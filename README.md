@@ -24,5 +24,5 @@ Press Ctrl-C to quit
 
 1. Use Postman and enter http://localhost:4555/index.php?create=true as the API endpoint.
 2. Select `raw` for the body and form an JSON array like this:
-``` {"link"=>"http://www.apple.com"} ```
+``` {"link": "http://www.apple.com"} ```
 3. Get the result
