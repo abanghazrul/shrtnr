@@ -61,15 +61,14 @@ class URLShortener
 
 		// Here, let's check to see if we're passing in a new link
 		if ( $_GET['create'] == 'true' ) {
-			// Get JSON as a string
-			//$json_str = file_get_contents('php://input');
-			$json_str = json_encode(array("link"=>$_POST['link']));
+
+			if (!empty($_POST['link'])):
+				$json_str = json_encode(array("link"=>$_POST['link']));
+			elseif(is_array($_POST)):
+				$json_str = file_get_contents('php://input');
+			endif;
 			// Get as an object
 			$json_obj = json_decode($json_str);
-
-			// Let's put this in JSON mode
-			//header('Content-type: application/json');
-			//echo json_encode($this->_create_new_shortlink($json_obj));
 
 			$this->obj = $this->_create_new_shortlink($json_obj);
 
