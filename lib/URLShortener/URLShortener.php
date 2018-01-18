@@ -10,6 +10,9 @@
 	Thanks to Ivan Akimov for the awesome HashIds library (http://www.hashids.org/php/)
 	Thanks to Solar Designs at Openwall for PHPass (http://www.openwall.com/phpass/)
 
+	Heavily modified by Hazrul to make the URLShortener class RESTful and send and return JSON objects
+	instead of sending post fields and expecting to return a JSON object.
+
 */
 
 
@@ -37,12 +40,14 @@ require_once(CONFIG_FILE);
 class URLShortener
 {
 
-	private $_version          = '0.2.0';
+	private $_version          = '0.3.0';
 	private $_content_dir      = 'content/';
 	private $_daily_count_file = '';
 	private $_alphabet         = '123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ'; // Alphabet excludes 0, O, I, and l to minimize ambiguious hashes
 
 	public $needs_password_set = false;
+
+	public $obj;
 
 	/**
 	 * The class constructor. Handles basic flow.
@@ -54,24 +59,21 @@ class URLShortener
 		// Set up the private variable values
 		$this->_daily_count_file = realpath(__DIR__ . '/../../inc/daily-count.txt');
 
-		// Off the bat, let's check to see if we have a hashed password
-		if ( ! $this->_is_hashed_password_defined() ) {
-			// It's up to the end user to implement a method (a form)
-			// which sets a password and allows us to save a salted hash of it.
-			if ( $this->_get_param('newpassword') == '' ) {
-				$this->needs_password_set = true;
-			} else {
-				// If we're here, we've passed in a new password to hash.
-				$this->_set_hashed_password();
-			}
-			return;
-		}
-
 		// Here, let's check to see if we're passing in a new link
 		if ( $_GET['create'] == 'true' ) {
+			// Get JSON as a string
+			//$json_str = file_get_contents('php://input');
+			$json_str = json_encode(array("link"=>$_POST['link']));
+			// Get as an object
+			$json_obj = json_decode($json_str);
+
 			// Let's put this in JSON mode
-			header('Content-type: application/json');
-			echo json_encode($this->_create_new_shortlink());
+			//header('Content-type: application/json');
+			//echo json_encode($this->_create_new_shortlink($json_obj));
+
+			$this->obj = $this->_create_new_shortlink($json_obj);
+
+			return $this->obj;
 			exit();
 		}
 
@@ -106,72 +108,16 @@ class URLShortener
 	 *
 	 * @return void
 	 **/
-	private function _create_new_shortlink()
+	private function _create_new_shortlink($json_obj)
 	{
-
-		// First, check the password
 		$this->_init_password_hasher();
-		$authCheck = $this->_hasher->CheckPassword($this->_get_param('pw'), HASHED_PASSWORD);
-
-		if ( $authCheck ) {
-			// In here, we're authorized to create a new shortlink
-			// First, let's see if we have a specific hash that was passed in.
-			// We'll use it as long as we have it and it's unique
-			$hash = $this->_get_param('hash');
-			if ( ! $hash || ($hash != '' && $this->_does_hash_exist($hash)) ) {
-				// Did we get here? We need a new unique hash
-				$hash = $this->_generate_new_hash();
-			}
-			// Now that we have a hash, try to save the link.
-			return $this->_save_link($hash);
-		} else {
-			$output = new stdClass;
-			$output->error = "Sorry, but your password was incorrect.";
-			return $output;
+		$hash = $json_obj->hash;
+		if ( ! $hash || ($hash != '' && $this->_does_hash_exist($hash)) ) {
+			// Did we get here? We need a new unique hash
+			$hash = $this->_generate_new_hash($json_obj);
 		}
-	}
-
-	/**
-	 * Sets the hashed password in the config file if one doesn't exist
-	 *
-	 * @return void
-	 **/
-	private function _set_hashed_password()
-	{
-		$newpassword = $this->_get_param('newpassword');
-
-		if ( $this->_is_hashed_password_defined() || $newpassword == '' ) {
-			return;
-		}
-
-		// Set up a new hasher instance
-		$this->_init_password_hasher();
-		$hash = $this->_hasher->HashPassword($newpassword);
-
-		// Open up the config file for writing the hash to
-		$handle = fopen(CONFIG_FILE, 'a') or die('Cannot open file: ' . CONFIG_FILE);
-
-		// Set up the new data to write to the config.
-		$configAdditions = array();
-		$configAdditions[] = '';
-		$configAdditions[] = '// This hashed password is set automatically.';
-		$configAdditions[] = '// To reset your password, delete this comment and the HASHED_PASSWORD line below reload index.php in a browser';
-		$configAdditions[] = "define('HASHED_PASSWORD', '$hash');";
-
-		// And write it.
-		fwrite($handle, implode("\n", $configAdditions));
-		// Close out the file
-		fclose($handle);
-	}
-
-	/**
-	 * Tells us whether or not the hashed password is defined
-	 *
-	 * @return void
-	 **/
-	private function _is_hashed_password_defined()
-	{
-		return defined('HASHED_PASSWORD');
+		// Now that we have a hash, try to save the link.
+		return $this->_save_link($json_obj,$hash);
 	}
 
 	/**
@@ -186,6 +132,10 @@ class URLShortener
 			$hash = substr($url, 1);
 			// Shortened URL
 			if (file_exists("$this->_content_dir/urls/$hash.url")) {
+				date_default_timezone_set("Asia/Singapore");
+				$line = date('Y-m-d H:i:s') . " - From: $_SERVER[REMOTE_ADDR] -TO-> $_SERVER[REQUEST_URI]";
+				file_put_contents($this->_content_dir.'/stats/visitors.log', $line . PHP_EOL, FILE_APPEND);
+
 				$contents = file("$this->_content_dir/urls/$hash.url");
 				header('HTTP/1.1 301 Moved Permanently');
 				header('Location: '.$contents[0]);
@@ -199,7 +149,7 @@ class URLShortener
 	 *
 	 * @return string - the new hash
 	 **/
-	private function _generate_new_hash()
+	private function _generate_new_hash($json_obj)
 	{
 		// Set up a new instance of hashids
 		$hashids = new Hashids\Hashids(HASH_SALT, 1, $this->alphabet);
@@ -211,7 +161,7 @@ class URLShortener
 		$dailycount = $this->_get_daily_count();
 
 		// Let's check if the user passed in an ID to hash
-		$passed_id = $this->_get_param('id');
+		$passed_id = $json_obj->id;
 		if ( $passed_id ) {
 			$id = intval($passed_id . $dailycount);
 		} else {
@@ -239,10 +189,11 @@ class URLShortener
 	 * @param $hash - the to use to save it
 	 * @return Object - The link data, or an error if the file was not writable.
 	 **/
-	private function _save_link($hash)
+	private function _save_link($json_obj,$hash)
 	{
 		$output = new stdClass;
-		$link = trim($this->_get_param('link'));
+
+		$link = trim($json_obj->link);
 
 		if ( $link ) {
 			$fh = fopen("$this->_content_dir/urls/$hash.url", 'w');
@@ -251,8 +202,8 @@ class URLShortener
 				fclose($fh);
 
 				$output->originalURL = $link;
-				$output->shortURL = ($_SERVER['HTTPS'] ? 'https' : 'http') . '://' . $_SERVER['SERVER_NAME'] . '/' . $hash;
-				$output->baseURL = $_SERVER['SERVER_NAME'];
+				$output->shortURL = ($_SERVER['HTTPS'] ? 'https' : 'http') . '://' . $_SERVER['SERVER_NAME'] . ":" .$_SERVER['SERVER_PORT'] . '/' . $hash;
+				$output->baseURL = $_SERVER['SERVER_NAME'].":".$_SERVER['SERVER_PORT'];
 				$output->hash = $hash;
 				// Increment the daily count
 				$this->_increment_daily_count();

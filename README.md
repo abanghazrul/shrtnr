@@ -13,3 +13,9 @@ Listening on localhost:4555
 Document root is /home/me/shrtnr
 Press Ctrl-C to quit
 ```
+
+# Instructions
+
+1. Go to http://localhost:4555 on the browser
+2. Enter a long Url
+3. Get the result
